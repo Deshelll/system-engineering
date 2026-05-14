@@ -1,0 +1,1962 @@
+openapi: 3.0.3
+
+info:
+  title: Система мониторинга и алертинга для продуктовой платформы
+  version: 1.0.0
+  description: |
+    REST API для внешних интерфейсов СМА: onboarding сервисов, работа с алертами,
+    silences, SLO, on-call расписаниями, событиями деплоев, webhooks и административными
+    объектами multi-tenant платформы.
+
+servers:
+  - url: https://sma.example.com/api/v1
+    description: Production environment
+  - url: https://sma-staging.example.com/api/v1
+    description: Staging environment
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Services
+    description: Подключение сервисов к мониторингу и получение service metadata.
+  - name: Telemetry
+    description: HTTP-интерфейсы для приёма телеметрии и проверки ingestion-статуса.
+  - name: Alerts
+    description: Просмотр, фильтрация и детализация алертов.
+  - name: Alert lifecycle
+    description: Ack, resolve, re-route и эскалация алертов.
+  - name: Silences
+    description: Maintenance windows и временное подавление алертов.
+  - name: On-call
+    description: Ротации, текущий дежурный, swaps и escalation policies.
+  - name: SLO
+    description: Управление SLO, error budget и burn-rate состоянием.
+  - name: Rules
+    description: Alert rules и recording rules как декларативная конфигурация.
+  - name: Deploy events
+    description: События CI/CD для корреляции алертов с деплоями.
+  - name: Webhooks
+    description: Подписки на outbound-события СМА.
+  - name: Admin
+    description: Tenants, quotas, RBAC и audit log.
+  - name: Health
+    description: Health-check и self-monitoring API.
+
+paths:
+  /services:
+    get:
+      tags: [Services]
+      summary: Получить список сервисов tenant-а
+      description: Возвращает сервисы, зарегистрированные в СМА или синхронизированные из Service Catalog / CMDB.
+      operationId: listServices
+      parameters:
+        - $ref: '#/components/parameters/TenantIdHeader'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - name: team
+          in: query
+          description: Фильтр по команде-владельцу сервиса.
+          schema:
+            type: string
+        - name: criticality
+          in: query
+          description: Фильтр по критичности сервиса.
+          schema:
+            $ref: '#/components/schemas/ServiceCriticality'
+      responses:
+        '200':
+          description: Список сервисов.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+    post:
+      tags: [Services]
+      summary: Создать service entry вручную
+      description: Используется, если сервис ещё не синхронизирован из Service Catalog или работает вне Kubernetes.
+      operationId: createService
+      parameters:
+        - $ref: '#/components/parameters/TenantIdHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ServiceCreateRequest'
+      responses:
+        '201':
+          description: Service entry создан.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Service'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /services/{service_id}:
+    get:
+      tags: [Services]
+      summary: Получить карточку сервиса
+      operationId: getService
+      parameters:
+        - $ref: '#/components/parameters/TenantIdHeader'
+        - $ref: '#/components/parameters/ServiceIdPath'
+      responses:
+        '200':
+          description: Карточка сервиса.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Service'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /services/{service_id}/onboarding/verify:
+    post:
+      tags: [Services]
+      summary: Проверить подключение сервиса к мониторингу
+      description: Проверяет наличие последних метрик, логов, трейсов и базовых алертов для сервиса.
+      operationId: verifyServiceOnboarding
+      parameters:
+        - $ref: '#/components/parameters/TenantIdHeader'
+        - $ref: '#/components/parameters/ServiceIdPath'
+      responses:
+        '200':
+          description: Результат проверки onboarding.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OnboardingVerificationResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /telemetry/ingest/logs:
+    post:
+      tags: [Telemetry]
+      summary: Принять batch логов через HTTP
+      description: |
+        HTTP fallback для log ingestion. Основной путь — OTLP Logs или syslog через OTel Collector.
+        Endpoint нужен для legacy-агентов и ручной интеграции.
+      operationId: ingestLogs
+      security:
+        - apiKeyAuth: []
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TenantIdHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LogBatchRequest'
+      responses:
+        '202':
+          description: Batch принят в ingestion pipeline.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IngestionAckResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /telemetry/ingest/deploy-events:
+    post:
+      tags: [Deploy events]
+      summary: Зарегистрировать событие деплоя
+      description: CI/CD pipeline отправляет событие деплоя для последующей корреляции с алертами и расследованием.
+      operationId: createDeployEvent
+      security:
+        - apiKeyAuth: []
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TenantIdHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeployEventRequest'
+      responses:
+        '202':
+          description: Событие принято.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeployEventResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /telemetry/status:
+    get:
+      tags: [Telemetry]
+      summary: Получить ingestion-статус tenant-а
+      description: Возвращает лаг, drop-rate, backpressure-состояние и последние принятые сигналы.
+      operationId: getTelemetryStatus
+      parameters:
+        - $ref: '#/components/parameters/TenantIdHeader'
+        - name: service_id
+          in: query
+          schema:
+            type: string
+          description: Ограничить статус одним сервисом.
+      responses:
+        '200':
+          description: Текущий ingestion-статус.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TelemetryStatusResponse'
+
+  /alerts:
+    get:
+      tags: [Alerts]
+      summary: Получить список алертов
+      description: Возвращает активные и исторические alert instances с фильтрацией по tenant, service, severity, status и временным окнам.
+      operationId: listAlerts
+      parameters:
+        - $ref: '#/components/parameters/TenantIdHeader'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - name: service_id
+          in: query
+          schema:
+            type: string
+        - name: severity
+          in: query
+          schema:
+            $ref: '#/components/schemas/AlertSeverity'
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/AlertStatus'
+        - name: from
+          in: query
+          description: Начало временного окна в ISO 8601.
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          description: Конец временного окна в ISO 8601.
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: Список алертов.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+    post:
+      tags: [Alerts]
+      summary: Создать внешний алерт
+      description: Используется внешними системами, которые хотят передать alert event в СМА через API.
+      operationId: createExternalAlert
+      security:
+        - apiKeyAuth: []
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TenantIdHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExternalAlertCreateRequest'
+      responses:
+        '201':
+          description: Алерт создан.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Alert'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /alerts/{alert_id}:
+    get:
+      tags: [Alerts]
+      summary: Получить детализацию алерта
+      operationId: getAlert
+      parameters:
+        - $ref: '#/components/parameters/TenantIdHeader'
+        - $ref: '#/components/parameters/AlertIdPath'
+      responses:
+        '200':
+          description: Детальная карточка алерта.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertDetail'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /alerts/{alert_id}/ack:
+    post:
+      tags: [Alert lifecycle]
+      summary: Подтвердить алерт
+      description: Используется UI, мобильным приложением или интерактивной кнопкой в Slack/Telegram.
+      operationId: acknowledgeAlert
+      parameters:
+        - $ref: '#/components/parameters/TenantIdHeader'
+        - $ref: '#/components/parameters/AlertIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AlertAckRequest'
+      responses:
+        '200':
+          description: Алерт подтверждён, эскалация остановлена.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertLifecycleResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /alerts/{alert_id}/resolve:
+    post:
+      tags: [Alert lifecycle]
+      summary: Закрыть алерт вручную
+      operationId: resolveAlert
+      parameters:
+        - $ref: '#/components/parameters/TenantIdHeader'
+        - $ref: '#/components/parameters/AlertIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AlertResolveRequest'
+      responses:
+        '200':
+          description: Алерт закрыт.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertLifecycleResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /alerts/{alert_id}/reroute:
+    post:
+      tags: [Alert lifecycle]
+      summary: Передать алерт другой команде или инженеру
+      operationId: rerouteAlert
+      parameters:
+        - $ref: '#/components/parameters/TenantIdHeader'
+        - $ref: '#/components/parameters/AlertIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AlertRerouteRequest'
+      responses:
+        '200':
+          description: Маршрут алерта изменён.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertLifecycleResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /alerts/{alert_id}/timeline:
+    get:
+      tags: [Alerts]
+      summary: Получить timeline алерта
+      description: "Возвращает события lifecycle: created, notified, acked, escalated, resolved."
+      operationId: getAlertTimeline
+      parameters:
+        - $ref: '#/components/parameters/TenantIdHeader'
+        - $ref: '#/components/parameters/AlertIdPath'
+      responses:
+        '200':
+          description: Timeline алерта.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertTimelineResponse'
+
+  /silences:
+    get:
+      tags: [Silences]
+      summary: Получить список silence / maintenance windows
+      operationId: listSilences
+      parameters:
+        - $ref: '#/components/parameters/TenantIdHeader'
+        - name: active_only
+          in: query
+          schema:
+            type: boolean
+            default: true
+      responses:
+        '200':
+          description: Список silence.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SilenceListResponse'
+
+    post:
+      tags: [Silences]
+      summary: Создать silence / maintenance window
+      description: Подавляет отправку уведомлений по matcher-ам. Сработавшие алерты сохраняются в истории как silenced.
+      operationId: createSilence
+      parameters:
+        - $ref: '#/components/parameters/TenantIdHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SilenceCreateRequest'
+      responses:
+        '201':
+          description: Silence создан.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Silence'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /silences/{silence_id}:
+    delete:
+      tags: [Silences]
+      summary: Принудительно снять silence
+      operationId: deleteSilence
+      parameters:
+        - $ref: '#/components/parameters/TenantIdHeader'
+        - $ref: '#/components/parameters/SilenceIdPath'
+      responses:
+        '204':
+          description: Silence снят.
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /rules:
+    get:
+      tags: [Rules]
+      summary: Получить список alert rules
+      operationId: listRules
+      parameters:
+        - $ref: '#/components/parameters/TenantIdHeader'
+        - name: service_id
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Список правил.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuleListResponse'
+
+    post:
+      tags: [Rules]
+      summary: Создать или обновить alert rule
+      description: "API-слой для GitOps/CI: правило считается декларативной конфигурацией и должно иметь source_ref."
+      operationId: upsertRule
+      parameters:
+        - $ref: '#/components/parameters/TenantIdHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RuleUpsertRequest'
+      responses:
+        '200':
+          description: Правило применено.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuleDefinition'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /slos:
+    get:
+      tags: [SLO]
+      summary: Получить список SLO
+      operationId: listSLOs
+      parameters:
+        - $ref: '#/components/parameters/TenantIdHeader'
+        - name: service_id
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Список SLO.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SLOListResponse'
+
+    post:
+      tags: [SLO]
+      summary: Создать или обновить SLO
+      operationId: upsertSLO
+      parameters:
+        - $ref: '#/components/parameters/TenantIdHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SLOUpsertRequest'
+      responses:
+        '200':
+          description: SLO применён.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SLODefinition'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /slos/{slo_id}/state:
+    get:
+      tags: [SLO]
+      summary: Получить текущее состояние SLO и error budget
+      operationId: getSLOState
+      parameters:
+        - $ref: '#/components/parameters/TenantIdHeader'
+        - $ref: '#/components/parameters/SLOIdPath'
+      responses:
+        '200':
+          description: Состояние SLO.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SLOState'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /oncall/rotations:
+    get:
+      tags: [On-call]
+      summary: Получить список on-call ротаций
+      operationId: listRotations
+      parameters:
+        - $ref: '#/components/parameters/TenantIdHeader'
+        - name: team
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Список ротаций.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RotationListResponse'
+
+    post:
+      tags: [On-call]
+      summary: Создать on-call ротацию
+      operationId: createRotation
+      parameters:
+        - $ref: '#/components/parameters/TenantIdHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RotationCreateRequest'
+      responses:
+        '201':
+          description: Ротация создана.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OnCallRotation'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /oncall/current:
+    get:
+      tags: [On-call]
+      summary: Получить текущего дежурного
+      operationId: getCurrentOnCall
+      parameters:
+        - $ref: '#/components/parameters/TenantIdHeader'
+        - name: team
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: severity
+          in: query
+          schema:
+            $ref: '#/components/schemas/AlertSeverity'
+      responses:
+        '200':
+          description: Текущий primary/secondary on-call.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CurrentOnCallResponse'
+
+  /oncall/swaps:
+    post:
+      tags: [On-call]
+      summary: Запросить обмен дежурством
+      operationId: requestOnCallSwap
+      parameters:
+        - $ref: '#/components/parameters/TenantIdHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OnCallSwapRequest'
+      responses:
+        '202':
+          description: Запрос на swap создан и отправлен на подтверждение.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OnCallSwapResponse'
+
+  /webhooks/subscriptions:
+    get:
+      tags: [Webhooks]
+      summary: Получить webhook-подписки tenant-а
+      operationId: listWebhookSubscriptions
+      parameters:
+        - $ref: '#/components/parameters/TenantIdHeader'
+      responses:
+        '200':
+          description: Список подписок.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebhookSubscriptionListResponse'
+
+    post:
+      tags: [Webhooks]
+      summary: Создать webhook-подписку
+      description: Позволяет внешним системам получать события alert.created, alert.acked, alert.resolved, silence.created, slo.breached.
+      operationId: createWebhookSubscription
+      parameters:
+        - $ref: '#/components/parameters/TenantIdHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WebhookSubscriptionCreateRequest'
+      responses:
+        '201':
+          description: Подписка создана.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebhookSubscription'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /admin/tenants:
+    get:
+      tags: [Admin]
+      summary: Получить список tenants
+      operationId: listTenants
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: Список tenants.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TenantListResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+    post:
+      tags: [Admin]
+      summary: Создать tenant
+      operationId: createTenant
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TenantCreateRequest'
+      responses:
+        '201':
+          description: Tenant создан.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tenant'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /admin/tenants/{tenant_id}/quotas:
+    put:
+      tags: [Admin]
+      summary: Обновить квоты tenant-а
+      operationId: updateTenantQuotas
+      parameters:
+        - $ref: '#/components/parameters/TenantIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TenantQuotas'
+      responses:
+        '200':
+          description: Квоты обновлены.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tenant'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /admin/audit-log:
+    get:
+      tags: [Admin]
+      summary: Получить audit log
+      operationId: listAuditLog
+      parameters:
+        - $ref: '#/components/parameters/TenantIdHeader'
+        - name: actor_id
+          in: query
+          schema:
+            type: string
+        - name: action
+          in: query
+          schema:
+            type: string
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: Записи audit log.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditLogResponse'
+
+  /health:
+    get:
+      tags: [Health]
+      summary: Проверить доступность API
+      operationId: getHealth
+      security: []
+      responses:
+        '200':
+          description: API доступен.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  /health/dependencies:
+    get:
+      tags: [Health]
+      summary: Проверить состояние зависимостей СМА
+      operationId: getDependenciesHealth
+      responses:
+        '200':
+          description: Состояние зависимостей.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DependenciesHealthResponse'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT access token, полученный через корпоративный IdP / SSO.
+    apiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: "API key для системных интеграций: CI/CD, legacy agents, external monitoring."
+
+  parameters:
+    TenantIdHeader:
+      name: X-Tenant-ID
+      in: header
+      required: true
+      description: Идентификатор tenant-а / команды. Используется для logical multi-tenancy и RBAC.
+      schema:
+        type: string
+        example: team-payments
+    TenantIdPath:
+      name: tenant_id
+      in: path
+      required: true
+      schema:
+        type: string
+      example: team-payments
+    ServiceIdPath:
+      name: service_id
+      in: path
+      required: true
+      schema:
+        type: string
+      example: payment-api
+    AlertIdPath:
+      name: alert_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      example: 7a8f3e2e-6e2a-4e97-8a1c-305d60a51a3e
+    SilenceIdPath:
+      name: silence_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    SLOIdPath:
+      name: slo_id
+      in: path
+      required: true
+      schema:
+        type: string
+      example: payment-api-availability-30d
+    Page:
+      name: page
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+    PageSize:
+      name: page_size
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 200
+        default: 50
+
+  responses:
+    BadRequest:
+      description: Некорректный запрос.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Unauthorized:
+      description: Пользователь не аутентифицирован.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Forbidden:
+      description: Недостаточно прав для операции.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    NotFound:
+      description: Объект не найден.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Conflict:
+      description: Конфликт состояния или дублирующийся ресурс.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    TooManyRequests:
+      description: Превышена квота tenant-а или активирован backpressure.
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+          description: Через сколько секунд можно повторить запрос.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+  schemas:
+    ErrorResponse:
+      type: object
+      required: [error_id, code, message]
+      properties:
+        error_id:
+          type: string
+          format: uuid
+          example: 28bfcad6-c7d1-43a3-8e7d-35c02cf33a16
+        code:
+          type: string
+          example: VALIDATION_ERROR
+        message:
+          type: string
+          example: Field service_id is required
+        details:
+          type: object
+          additionalProperties: true
+
+    PageMeta:
+      type: object
+      required: [page, page_size, total]
+      properties:
+        page:
+          type: integer
+          example: 1
+        page_size:
+          type: integer
+          example: 50
+        total:
+          type: integer
+          example: 128
+
+    Labels:
+      type: object
+      description: Набор labels для маршрутизации, фильтрации и корреляции.
+      additionalProperties:
+        type: string
+      example:
+        service: payment-api
+        env: prod
+        team: payments
+        region: eu-west-1
+
+    ServiceCriticality:
+      type: string
+      enum: [tier-1, tier-2, tier-3, internal]
+      example: tier-1
+
+    Service:
+      type: object
+      required: [service_id, name, team, criticality, environments, onboarding_status]
+      properties:
+        service_id:
+          type: string
+          example: payment-api
+        name:
+          type: string
+          example: Payment API
+        team:
+          type: string
+          example: payments
+        owner_email:
+          type: string
+          format: email
+          example: payments-team@example.com
+        criticality:
+          $ref: '#/components/schemas/ServiceCriticality'
+        environments:
+          type: array
+          items:
+            type: string
+          example: [prod, staging]
+        labels:
+          $ref: '#/components/schemas/Labels'
+        onboarding_status:
+          type: string
+          enum: [not_started, partial, active, failed]
+          example: active
+        catalog_ref:
+          type: string
+          example: cmdb://services/payment-api
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    ServiceCreateRequest:
+      type: object
+      required: [service_id, name, team, criticality]
+      properties:
+        service_id:
+          type: string
+          example: payment-api
+        name:
+          type: string
+          example: Payment API
+        team:
+          type: string
+          example: payments
+        owner_email:
+          type: string
+          format: email
+        criticality:
+          $ref: '#/components/schemas/ServiceCriticality'
+        environments:
+          type: array
+          items:
+            type: string
+          example: [prod, staging]
+
+    ServiceListResponse:
+      type: object
+      required: [items, page]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Service'
+        page:
+          $ref: '#/components/schemas/PageMeta'
+
+    OnboardingVerificationResponse:
+      type: object
+      required: [service_id, status, checks]
+      properties:
+        service_id:
+          type: string
+          example: payment-api
+        status:
+          type: string
+          enum: [passed, warning, failed]
+          example: passed
+        checks:
+          type: array
+          items:
+            type: object
+            required: [name, status]
+            properties:
+              name:
+                type: string
+                example: metrics_received
+              status:
+                type: string
+                enum: [passed, warning, failed]
+              message:
+                type: string
+                example: Last metric received 12 seconds ago
+
+    LogBatchRequest:
+      type: object
+      required: [service_id, entries]
+      properties:
+        service_id:
+          type: string
+          example: payment-api
+        entries:
+          type: array
+          maxItems: 10000
+          items:
+            $ref: '#/components/schemas/LogEntry'
+
+    LogEntry:
+      type: object
+      required: [timestamp, level, message]
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        level:
+          type: string
+          enum: [debug, info, warn, error, fatal]
+          example: error
+        message:
+          type: string
+          example: upstream request timeout
+        trace_id:
+          type: string
+          example: 4bf92f3577b34da6a3ce929d0e0e4736
+        span_id:
+          type: string
+          example: 00f067aa0ba902b7
+        labels:
+          $ref: '#/components/schemas/Labels'
+        attributes:
+          type: object
+          additionalProperties: true
+
+    IngestionAckResponse:
+      type: object
+      required: [accepted, rejected, ingestion_id]
+      properties:
+        ingestion_id:
+          type: string
+          format: uuid
+        accepted:
+          type: integer
+          example: 9998
+        rejected:
+          type: integer
+          example: 2
+        backpressure_active:
+          type: boolean
+          example: false
+        rejected_reason:
+          type: string
+          nullable: true
+          example: quota_exceeded
+
+    TelemetryStatusResponse:
+      type: object
+      properties:
+        tenant_id:
+          type: string
+          example: team-payments
+        service_id:
+          type: string
+          nullable: true
+          example: payment-api
+        metrics_last_seen_at:
+          type: string
+          format: date-time
+          nullable: true
+        logs_last_seen_at:
+          type: string
+          format: date-time
+          nullable: true
+        traces_last_seen_at:
+          type: string
+          format: date-time
+          nullable: true
+        ingestion_lag_seconds:
+          type: number
+          example: 8.4
+        drop_rate_percent:
+          type: number
+          example: 0.03
+        backpressure_active:
+          type: boolean
+          example: false
+
+    DeployEventRequest:
+      type: object
+      required: [service_id, environment, version, status, started_at]
+      properties:
+        service_id:
+          type: string
+          example: payment-api
+        environment:
+          type: string
+          example: prod
+        version:
+          type: string
+          example: 2026.05.14-rc.2
+        commit_sha:
+          type: string
+          example: a3f7c09a881a0c1d7aa04cc2b8e98fef85e13d01
+        status:
+          type: string
+          enum: [started, succeeded, failed, rolled_back]
+          example: succeeded
+        started_at:
+          type: string
+          format: date-time
+        finished_at:
+          type: string
+          format: date-time
+          nullable: true
+        pipeline_url:
+          type: string
+          format: uri
+          example: https://gitlab.example.com/payments/payment-api/-/pipelines/123
+
+    DeployEventResponse:
+      type: object
+      required: [event_id, accepted]
+      properties:
+        event_id:
+          type: string
+          format: uuid
+        accepted:
+          type: boolean
+          example: true
+        correlation_window_minutes:
+          type: integer
+          example: 60
+
+    AlertSeverity:
+      type: string
+      enum: [P1, P2, P3, P4]
+      example: P1
+
+    AlertStatus:
+      type: string
+      enum: [triggered, acknowledged, silenced, resolved, expired]
+      example: triggered
+
+    Alert:
+      type: object
+      required: [alert_id, name, severity, status, service_id, started_at]
+      properties:
+        alert_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          example: HighErrorRate
+        severity:
+          $ref: '#/components/schemas/AlertSeverity'
+        status:
+          $ref: '#/components/schemas/AlertStatus'
+        service_id:
+          type: string
+          example: payment-api
+        tenant_id:
+          type: string
+          example: team-payments
+        summary:
+          type: string
+          example: Error rate is above 5% for 5 minutes
+        labels:
+          $ref: '#/components/schemas/Labels'
+        annotations:
+          type: object
+          additionalProperties:
+            type: string
+          example:
+            runbook_url: https://runbooks.example.com/payment-api/high-error-rate
+            dashboard_url: https://grafana.example.com/d/payment-api
+        started_at:
+          type: string
+          format: date-time
+        acknowledged_at:
+          type: string
+          format: date-time
+          nullable: true
+        resolved_at:
+          type: string
+          format: date-time
+          nullable: true
+        assignee:
+          $ref: '#/components/schemas/UserRef'
+
+    AlertDetail:
+      allOf:
+        - $ref: '#/components/schemas/Alert'
+        - type: object
+          properties:
+            rule_id:
+              type: string
+              example: payment-api-high-error-rate
+            expression:
+              type: string
+              example: rate(http_requests_total{status=~"5.."}[5m]) / rate(http_requests_total[5m]) > 0.05
+            correlated_signals:
+              type: array
+              items:
+                $ref: '#/components/schemas/CorrelatedSignal'
+            jira_ticket:
+              type: string
+              nullable: true
+              example: SRE-1234
+
+    CorrelatedSignal:
+      type: object
+      required: [type, title, url]
+      properties:
+        type:
+          type: string
+          enum: [metric, log, trace, deploy_event, dashboard]
+        title:
+          type: string
+          example: Deploy payment-api 2026.05.14-rc.2
+        url:
+          type: string
+          format: uri
+          example: https://grafana.example.com/explore?left=...
+        timestamp:
+          type: string
+          format: date-time
+          nullable: true
+
+    AlertListResponse:
+      type: object
+      required: [items, page]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Alert'
+        page:
+          $ref: '#/components/schemas/PageMeta'
+
+    ExternalAlertCreateRequest:
+      type: object
+      required: [name, severity, service_id, summary]
+      properties:
+        name:
+          type: string
+          example: ExternalSyntheticCheckFailed
+        severity:
+          $ref: '#/components/schemas/AlertSeverity'
+        service_id:
+          type: string
+          example: payment-api
+        summary:
+          type: string
+        labels:
+          $ref: '#/components/schemas/Labels'
+        source:
+          type: string
+          example: external-synthetic-monitoring
+        idempotency_key:
+          type: string
+          example: synthetic-payment-api-2026-05-14T10:00:00Z
+
+    AlertAckRequest:
+      type: object
+      required: [acknowledged_by]
+      properties:
+        acknowledged_by:
+          type: string
+          example: user-123
+        comment:
+          type: string
+          example: Investigating, likely related to recent deploy
+        source:
+          type: string
+          enum: [ui, mobile, slack, telegram, api]
+          example: mobile
+
+    AlertResolveRequest:
+      type: object
+      required: [resolved_by, resolution]
+      properties:
+        resolved_by:
+          type: string
+          example: user-123
+        resolution:
+          type: string
+          example: Rolled back version 2026.05.14-rc.2
+        create_postmortem:
+          type: boolean
+          default: false
+
+    AlertRerouteRequest:
+      type: object
+      required: [target_team, reason]
+      properties:
+        target_team:
+          type: string
+          example: platform-network
+        target_user_id:
+          type: string
+          nullable: true
+          example: user-456
+        reason:
+          type: string
+          example: Root cause is network gateway latency
+
+    AlertLifecycleResponse:
+      type: object
+      required: [alert_id, status, updated_at]
+      properties:
+        alert_id:
+          type: string
+          format: uuid
+        status:
+          $ref: '#/components/schemas/AlertStatus'
+        updated_at:
+          type: string
+          format: date-time
+        escalation_stopped:
+          type: boolean
+          example: true
+
+    AlertTimelineResponse:
+      type: object
+      required: [alert_id, events]
+      properties:
+        alert_id:
+          type: string
+          format: uuid
+        events:
+          type: array
+          items:
+            $ref: '#/components/schemas/AlertTimelineEvent'
+
+    AlertTimelineEvent:
+      type: object
+      required: [timestamp, event_type]
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        event_type:
+          type: string
+          enum: [created, notified, acknowledged, escalated, silenced, resolved, expired, rerouted]
+        actor:
+          $ref: '#/components/schemas/UserRef'
+        message:
+          type: string
+          example: SMS notification sent via Twilio
+
+    UserRef:
+      type: object
+      nullable: true
+      properties:
+        user_id:
+          type: string
+          example: user-123
+        display_name:
+          type: string
+          example: Ivan Petrov
+        email:
+          type: string
+          format: email
+          example: ivan.petrov@example.com
+
+    Matcher:
+      type: object
+      required: [label, operator, value]
+      properties:
+        label:
+          type: string
+          example: service
+        operator:
+          type: string
+          enum: [equals, not_equals, regex, not_regex]
+          example: equals
+        value:
+          type: string
+          example: payment-api
+
+    Silence:
+      type: object
+      required: [silence_id, matchers, starts_at, ends_at, created_by, reason, status]
+      properties:
+        silence_id:
+          type: string
+          format: uuid
+        matchers:
+          type: array
+          items:
+            $ref: '#/components/schemas/Matcher'
+        starts_at:
+          type: string
+          format: date-time
+        ends_at:
+          type: string
+          format: date-time
+        created_by:
+          $ref: '#/components/schemas/UserRef'
+        reason:
+          type: string
+          example: Planned database migration
+        jira_ticket:
+          type: string
+          nullable: true
+          example: CHG-4551
+        status:
+          type: string
+          enum: [pending, active, expired, cancelled]
+        requires_second_approval:
+          type: boolean
+          example: false
+
+    SilenceCreateRequest:
+      type: object
+      required: [matchers, starts_at, ends_at, reason]
+      properties:
+        matchers:
+          type: array
+          items:
+            $ref: '#/components/schemas/Matcher'
+        starts_at:
+          type: string
+          format: date-time
+        ends_at:
+          type: string
+          format: date-time
+        reason:
+          type: string
+          example: Planned database migration
+        jira_ticket:
+          type: string
+          example: CHG-4551
+
+    SilenceListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Silence'
+
+    RuleDefinition:
+      type: object
+      required: [rule_id, name, expression, severity, service_id]
+      properties:
+        rule_id:
+          type: string
+          example: payment-api-high-error-rate
+        name:
+          type: string
+          example: HighErrorRate
+        service_id:
+          type: string
+          example: payment-api
+        expression:
+          type: string
+          example: rate(http_requests_total{status=~"5.."}[5m]) / rate(http_requests_total[5m]) > 0.05
+        for_duration:
+          type: string
+          example: 5m
+        severity:
+          $ref: '#/components/schemas/AlertSeverity'
+        labels:
+          $ref: '#/components/schemas/Labels'
+        annotations:
+          type: object
+          additionalProperties:
+            type: string
+        source_ref:
+          type: string
+          example: git://sma-config/tenants/team-payments/rules/payment.yaml
+        enabled:
+          type: boolean
+          default: true
+
+    RuleUpsertRequest:
+      allOf:
+        - $ref: '#/components/schemas/RuleDefinition'
+
+    RuleListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/RuleDefinition'
+
+    SLODefinition:
+      type: object
+      required: [slo_id, service_id, name, sli_query, target_percent, window]
+      properties:
+        slo_id:
+          type: string
+          example: payment-api-availability-30d
+        service_id:
+          type: string
+          example: payment-api
+        name:
+          type: string
+          example: Payment API availability
+        sli_query:
+          type: string
+          example: sum(rate(http_requests_total{status!~"5.."}[5m])) / sum(rate(http_requests_total[5m]))
+        target_percent:
+          type: number
+          format: double
+          example: 99.9
+        window:
+          type: string
+          example: 30d
+        burn_rate_alerts:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+                example: fast-burn
+              window:
+                type: string
+                example: 1h
+              threshold:
+                type: number
+                example: 14.4
+              severity:
+                $ref: '#/components/schemas/AlertSeverity'
+        source_ref:
+          type: string
+          example: git://sma-config/tenants/team-payments/slo/payment-api.yaml
+
+    SLOUpsertRequest:
+      allOf:
+        - $ref: '#/components/schemas/SLODefinition'
+
+    SLOListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/SLODefinition'
+
+    SLOState:
+      type: object
+      required: [slo_id, current_sli_percent, error_budget_remaining_percent, burn_rate]
+      properties:
+        slo_id:
+          type: string
+          example: payment-api-availability-30d
+        current_sli_percent:
+          type: number
+          example: 99.94
+        error_budget_remaining_percent:
+          type: number
+          example: 42.5
+        error_budget_remaining_minutes:
+          type: number
+          example: 18.3
+        burn_rate:
+          type: number
+          example: 2.1
+        status:
+          type: string
+          enum: [healthy, warning, breached]
+          example: warning
+        updated_at:
+          type: string
+          format: date-time
+
+    OnCallRotation:
+      type: object
+      required: [rotation_id, team, members, handoff_time, timezone]
+      properties:
+        rotation_id:
+          type: string
+          format: uuid
+        team:
+          type: string
+          example: payments
+        members:
+          type: array
+          items:
+            $ref: '#/components/schemas/RotationMember'
+        handoff_time:
+          type: string
+          example: Monday 10:00
+        timezone:
+          type: string
+          example: Europe/Moscow
+        primary_shift_duration_days:
+          type: integer
+          example: 7
+        secondary_shift_duration_days:
+          type: integer
+          example: 7
+        enabled:
+          type: boolean
+          default: true
+
+    RotationMember:
+      type: object
+      required: [user_id, role]
+      properties:
+        user_id:
+          type: string
+          example: user-123
+        display_name:
+          type: string
+          example: Ivan Petrov
+        email:
+          type: string
+          format: email
+        role:
+          type: string
+          enum: [primary, secondary, manager]
+
+    RotationCreateRequest:
+      allOf:
+        - $ref: '#/components/schemas/OnCallRotation'
+
+    RotationListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/OnCallRotation'
+
+    CurrentOnCallResponse:
+      type: object
+      required: [team, primary]
+      properties:
+        team:
+          type: string
+          example: payments
+        primary:
+          $ref: '#/components/schemas/UserRef'
+        secondary:
+          $ref: '#/components/schemas/UserRef'
+        manager:
+          $ref: '#/components/schemas/UserRef'
+        valid_until:
+          type: string
+          format: date-time
+
+    OnCallSwapRequest:
+      type: object
+      required: [rotation_id, requester_id, target_user_id, shift_start, shift_end]
+      properties:
+        rotation_id:
+          type: string
+          format: uuid
+        requester_id:
+          type: string
+          example: user-123
+        target_user_id:
+          type: string
+          example: user-456
+        shift_start:
+          type: string
+          format: date-time
+        shift_end:
+          type: string
+          format: date-time
+        reason:
+          type: string
+          example: Vacation
+
+    OnCallSwapResponse:
+      type: object
+      properties:
+        swap_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [pending, approved, rejected, cancelled]
+          example: pending
+        approval_url:
+          type: string
+          format: uri
+
+    WebhookEventType:
+      type: string
+      enum: [alert.created, alert.acked, alert.resolved, silence.created, slo.breached, deploy.received]
+      example: alert.created
+
+    WebhookSubscription:
+      type: object
+      required: [subscription_id, url, events, enabled]
+      properties:
+        subscription_id:
+          type: string
+          format: uuid
+        url:
+          type: string
+          format: uri
+          example: https://hooks.example.com/sma/events
+        events:
+          type: array
+          items:
+            $ref: '#/components/schemas/WebhookEventType'
+        secret_configured:
+          type: boolean
+          example: true
+        enabled:
+          type: boolean
+          example: true
+        created_at:
+          type: string
+          format: date-time
+
+    WebhookSubscriptionCreateRequest:
+      type: object
+      required: [url, events]
+      properties:
+        url:
+          type: string
+          format: uri
+          example: https://hooks.example.com/sma/events
+        events:
+          type: array
+          items:
+            $ref: '#/components/schemas/WebhookEventType'
+        secret:
+          type: string
+          description: Shared secret для HMAC-подписи outbound webhook.
+          example: replace-with-secret
+
+    WebhookSubscriptionListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/WebhookSubscription'
+
+    Tenant:
+      type: object
+      required: [tenant_id, display_name, status, quotas]
+      properties:
+        tenant_id:
+          type: string
+          example: team-payments
+        display_name:
+          type: string
+          example: Payments Team
+        status:
+          type: string
+          enum: [active, suspended, archived]
+          example: active
+        quotas:
+          $ref: '#/components/schemas/TenantQuotas'
+        created_at:
+          type: string
+          format: date-time
+
+    TenantCreateRequest:
+      type: object
+      required: [tenant_id, display_name, quotas]
+      properties:
+        tenant_id:
+          type: string
+          example: team-payments
+        display_name:
+          type: string
+          example: Payments Team
+        quotas:
+          $ref: '#/components/schemas/TenantQuotas'
+
+    TenantQuotas:
+      type: object
+      required: [metrics_samples_per_second, logs_entries_per_second, traces_spans_per_second, storage_gb, query_concurrency]
+      properties:
+        metrics_samples_per_second:
+          type: integer
+          example: 100000
+        logs_entries_per_second:
+          type: integer
+          example: 50000
+        traces_spans_per_second:
+          type: integer
+          example: 10000
+        storage_gb:
+          type: integer
+          example: 5000
+        cardinality_limit:
+          type: integer
+          example: 2000000
+        query_concurrency:
+          type: integer
+          example: 20
+
+    TenantListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Tenant'
+        page:
+          $ref: '#/components/schemas/PageMeta'
+
+    AuditLogResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/AuditLogEntry'
+
+    AuditLogEntry:
+      type: object
+      properties:
+        event_id:
+          type: string
+          format: uuid
+        timestamp:
+          type: string
+          format: date-time
+        actor:
+          $ref: '#/components/schemas/UserRef'
+        action:
+          type: string
+          example: silence.create
+        resource_type:
+          type: string
+          example: silence
+        resource_id:
+          type: string
+          example: c9282f38-22d7-4c4a-8f6b-2fa2d3a99355
+        result:
+          type: string
+          enum: [success, denied, failed]
+        details:
+          type: object
+          additionalProperties: true
+
+    HealthResponse:
+      type: object
+      required: [status, version]
+      properties:
+        status:
+          type: string
+          enum: [ok, degraded, down]
+          example: ok
+        version:
+          type: string
+          example: 1.0.0
+        timestamp:
+          type: string
+          format: date-time
+
+    DependencyStatus:
+      type: object
+      required: [name, status]
+      properties:
+        name:
+          type: string
+          example: mimir
+        status:
+          type: string
+          enum: [ok, degraded, down]
+          example: ok
+        latency_ms:
+          type: number
+          example: 35.4
+        message:
+          type: string
+          nullable: true
+
+    DependenciesHealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [ok, degraded, down]
+          example: degraded
+        dependencies:
+          type: array
+          items:
+            $ref: '#/components/schemas/DependencyStatus'
