@@ -1,0 +1,101 @@
+.markdown-section {
+    max-width: 950px;
+}
+
+.markdown-section img {
+    max-width: 100%;
+}
+
+.markdown-section table {
+    display: table;
+    width: 100%;
+}
+
+.markdown-section table tr {
+    background-color: transparent !important;
+}
+
+.markdown-section table th {
+    font-size: 18px;
+}
+
+.docsify-pagination-container {
+    margin: 0;
+    border-top: none;
+    overflow: visible;
+}
+
+.pagination-item {
+    position: fixed;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 9999;
+    margin: 0;
+}
+
+.pagination-item a {
+    width: 44px;
+    height: 90vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(36, 42, 60, 0.75);
+    color: #cfd3e6;
+    border-radius: 10px;
+    text-decoration: none;
+    transition: 0.2s;
+}
+
+.pagination-item a:hover {
+    background: rgba(60, 70, 95, 0.95);
+    color: #ffffff;
+    text-decoration: none;
+}
+
+.pagination-item--previous {
+    left: 315px;
+    text-align: left;
+}
+
+.pagination-item--next {
+    right: 30px;
+    text-align: right;
+}
+
+body.close .pagination-item--previous {
+    left: 30px;
+}
+
+.pagination-item-label,
+.pagination-item-title,
+.pagination-item-subtitle,
+.pagination-item svg {
+    display: none;
+}
+
+.pagination-item--previous a::before {
+    content: "‹";
+    font-size: 52px;
+    line-height: 1;
+}
+
+.pagination-item--next a::before {
+    content: "›";
+    font-size: 52px;
+    line-height: 1;
+}
+
+@media (max-width: 768px) {
+    .pagination-item--previous {
+        left: 15px;
+    }
+
+    .pagination-item--next {
+        right: 15px;
+    }
+
+    .pagination-item a {
+        width: 36px;
+        height: 56px;
+    }
+}
