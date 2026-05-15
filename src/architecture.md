@@ -943,13 +943,12 @@ Storage — главный cost driver observability платформ (част�
 Зафиксировано в FR-STO-001. Подтверждаем:
 
 
-|Signal|Hot |Cold|Total|
-|------|-----------|--------|------|
-|Metrics|15 дней|13 месяцев|13 месяцев|
-|Logs|7 дней|30 дней|30 дней (audit — 2 года)|
-|Traces|3 дня|7 дней|7 дней|
-|Audit log|—|2 года|2 года (immutable)|
-||
+| Signal | Hot | Cold | Total |
+| --- | --- | --- | --- |
+| Metrics | 15 дней | 13 месяцев | 13 месяцев |
+| Logs | 7 дней | 30 дней | 30 дней (audit — 2 года) |
+| Traces | 3 дня | 7 дней | 7 дней |
+| Audit log | — | 2 года | 2 года (immutable) |
 
 ### Подрешение 4: Replication & Durability
 
@@ -1139,16 +1138,16 @@ ADR-001..009 (всё, что имеет конфигурацию), FR-RUL-001, F
 
 Решения, отложенные до фазы Solution Architecture или последующих итераций:
 
-|ID|Тема |Триггер для принятия|
-|------|-----------|--------|
-|ADR-011|Sampling strategy (head vs tail)|После замеров trace volume в pilot|
-|ADR-012|Secrets management (Vault vs External Secrets vs Sealed Secrets)|До staging deployment|
-|ADR-013|Tenant directory / metadata service|При переходе к Phase 2 multi-tenancy|
-|ADR-014|Cost attribution / chargeback model|По запросу finance / C-COST-04|
-|ADR-015|Synthetic monitoring (Grafana Synthetic vs Blackbox Exporter)|После coverage gap analysis|
-|ADR-016|Continuous profiling (Pyroscope / Parca)|При появлении explicit requirement|
-|ADR-017|Long-term audit log архив (S3 Glacier / tape)|По compliance review (C-REG-01)|
-||
+| ID | Тема | Триггер для принятия |
+| --- | --- | --- |
+| ADR-011 | Sampling strategy (head vs tail) | После замеров trace volume в pilot |
+| ADR-012 | Secrets management (Vault vs External Secrets vs Sealed Secrets) | До staging deployment |
+| ADR-013 | Tenant directory / metadata service | При переходе к Phase 2 multi-tenancy |
+| ADR-014 | Cost attribution / chargeback model | По запросу finance / C-COST-04 |
+| ADR-015 | Synthetic monitoring (Grafana Synthetic vs Blackbox Exporter) | После coverage gap analysis |
+| ADR-016 | Continuous profiling (Pyroscope / Parca) | При появлении explicit requirement |
+| ADR-017 | Long-term audit log архив (S3 Glacier / tape) | По compliance review (C-REG-01) |
+
 ## 4.14. Влияние ADR на дальнейшие разделы
 
 ADR определяют рамки для следующих разделов:
