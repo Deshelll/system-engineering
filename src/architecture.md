@@ -335,7 +335,7 @@ ADR-001, ADR-002, ADR-004 (OTel Collector), ADR-006, FR-QRY-003.
 
 ## 4.5. ADR-004: Telemetry Collection Layer
 
-ADR-004: Выбор telemetry collection (agents/collectors)
+**ADR-004: Выбор telemetry collection (agents/collectors)**
 ─────────────────────────────────────
 Статус:               Accepted
 Дата:                 2024-XX-XX
@@ -941,7 +941,12 @@ Storage — главный cost driver observability платформ (част�
 ### Подрешение 3: Per-signal retention
 
 Зафиксировано в FR-STO-001. Подтверждаем:
-Table here
+|Signal|Hot |Cold|Total|
+|------|-----------|--------|------|
+|Metrics|15 дней|13 месяцев|13 месяцев|
+|Logs|7 дней|30 дней|30 дней (audit — 2 года)|
+|Traces|3 дня|7 дней|7 дней|
+|Audit log|—|2 года|2 года (immutable)|
 
 ### Подрешение 4: Replication & Durability
 
@@ -986,7 +991,7 @@ ADR-001..003 (backends), ADR-007 (multi-tenancy → data residency), FR-STO-_, F
 Дата:                 2024-XX-XX
 Источники требований: FR-RUL-001 (rules-as-code), FR-UI-002 (dashboards-as-code),
                       FR-ADM-001 (tenant provisioning),
-                      QAS-MAIN-01 (declarative config),
+                      Maintainability tactics (3.6.5),
                       C-ORG-02 (self-service), C-ORG-04 (audit)
 
 
@@ -1058,22 +1063,16 @@ GitOps означает: **Git — single source of truth** для конфиг�
 ### Решение
 
 Выбран **Argo CD** для GitOps reconciliation + **monorepo подход для конфигурации**:
+```text
 sma-config/
   platform/                # управляется SRE командой
-    mimir/                 # Helm values, quotas
+    mimir/
     loki/
-    tempo/
-    grafana/
-    alertmanager/
-    otel-gateway/
-  tenants/                 # self-service для команд
+    ...
+  tenants/
     team-payments/
-      tenant.yaml          # квоты, retention
-      rules/               # alerting + recording rules
-      dashboards/          # JSON dashboards
-      slo/                 # Sloth YAML
-    team-checkout/
       ...
+```
 **Workflow:**
 
 1.  Команда делает PR в свой  `tenants/team-X/`  каталог
@@ -1115,15 +1114,35 @@ sma-config/
 
 ### Связи
 
-ADR-001..009 (всё, что имеет конфигурацию), FR-RUL-001, FR-UI-002, FR-ADM-001, QAS-MAIN-01, C-ORG-02, C-ORG-04.
+ADR-001..009 (всё, что имеет конфигурацию), FR-RUL-001, FR-UI-002, FR-ADM-001, Maintainability tactics (3.6.5), C-ORG-02, C-ORG-04.
 
 ## 4.12. Сводная таблица ADR
 
-TABLE HERE
+|ID|Решение |Альтернативы (отвергнутые)|Ключевой driver|
+|------|-----------|--------|---------|
+|ADR-001|Grafana Mimir|Thanos, VictoriaMetrics, Cortex|Multi-tenancy first-class + PromQL 100%|
+|ADR-002|Grafana Loki|OpenSearch, ClickHouse, Elasticsearch|Cost + correlation с метриками|
+|ADR-003|Grafana Tempo|Jaeger, ClickHouse|Cost + native correlation|
+|ADR-004|OTel Collector (agent+gateway)|Vendor agents, Hybrid Fluent Bit|C-TECH-03 + unified pipeline|
+|ADR-005|Mimir Ruler + Alertmanager + Sloth|Grafana Alerting unified, vmalert|Native Mimir + proven at scale|
+|ADR-006|Grafana OSS|Grafana Enterprise, Perses | Maturity + AGPLv3|
+|ADR-007|Logical → Hybrid cell-based|Physical per-tenant|Cost-fit на старте + path к isolation|
+|ADR-008|Grafana OnCall + Twilio|PagerDuty, Opsgenie|Open source + no SaaS dependency|
+|ADR-009|2-tier (block + S3), per-signal retention|Single-tier, 3-tier|Cost balance + native support|
+|ADR-010|Argo CD + monorepo GitOps|Flux, UI-based, hybrid|Maturity + self-service UX|
+
 
 ## 4.13. Открытые вопросы и будущие ADR
 Решения, отложенные до фазы Solution Architecture или последующих итераций:
-TABLE HERE
+|ID|Тема |Триггер для принятия|
+|------|-----------|--------|
+|ADR-011|Sampling strategy (head vs tail)|После замеров trace volume в pilot|
+|ADR-012|Secrets management (Vault vs External Secrets vs Sealed Secrets)|До staging deployment|
+|ADR-013|Tenant directory / metadata service|При переходе к Phase 2 multi-tenancy|
+|ADR-014|Cost attribution / chargeback model|По запросу finance / C-COST-04|
+|ADR-015|Synthetic monitoring (Grafana Synthetic vs Blackbox Exporter)|После coverage gap analysis|
+|ADR-016|Continuous profiling (Pyroscope / Parca)|При появлении explicit requirement|
+|ADR-017|Long-term audit log архив (S3 Glacier / tape)|По compliance review (C-REG-01)|
 ## 4.14. Влияние ADR на дальнейшие разделы
 
 ADR определяют рамки для следующих разделов:
