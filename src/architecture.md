@@ -941,12 +941,15 @@ Storage — главный cost driver observability платформ (част�
 ### Подрешение 3: Per-signal retention
 
 Зафиксировано в FR-STO-001. Подтверждаем:
+
+
 |Signal|Hot |Cold|Total|
 |------|-----------|--------|------|
 |Metrics|15 дней|13 месяцев|13 месяцев|
 |Logs|7 дней|30 дней|30 дней (audit — 2 года)|
 |Traces|3 дня|7 дней|7 дней|
 |Audit log|—|2 года|2 года (immutable)|
+||
 
 ### Подрешение 4: Replication & Durability
 
@@ -1130,10 +1133,12 @@ ADR-001..009 (всё, что имеет конфигурацию), FR-RUL-001, F
 |ADR-008|Grafana OnCall + Twilio|PagerDuty, Opsgenie|Open source + no SaaS dependency|
 |ADR-009|2-tier (block + S3), per-signal retention|Single-tier, 3-tier|Cost balance + native support|
 |ADR-010|Argo CD + monorepo GitOps|Flux, UI-based, hybrid|Maturity + self-service UX|
-
+||
 
 ## 4.13. Открытые вопросы и будущие ADR
+
 Решения, отложенные до фазы Solution Architecture или последующих итераций:
+
 |ID|Тема |Триггер для принятия|
 |------|-----------|--------|
 |ADR-011|Sampling strategy (head vs tail)|После замеров trace volume в pilot|
@@ -1143,6 +1148,7 @@ ADR-001..009 (всё, что имеет конфигурацию), FR-RUL-001, F
 |ADR-015|Synthetic monitoring (Grafana Synthetic vs Blackbox Exporter)|После coverage gap analysis|
 |ADR-016|Continuous profiling (Pyroscope / Parca)|При появлении explicit requirement|
 |ADR-017|Long-term audit log архив (S3 Glacier / tape)|По compliance review (C-REG-01)|
+||
 ## 4.14. Влияние ADR на дальнейшие разделы
 
 ADR определяют рамки для следующих разделов:
