@@ -10,9 +10,8 @@
 - Акторов системы и их цели (2.2)
 - Каталог ключевых сценариев эксплуатации (2.3)
 - Детальное описание каждого сценария: предусловия, основной поток, 
-  альтернативы, метрики успеха (2.4–2.10)
-- Сводную матрицу «сценарии × компоненты СМА» (2.11)
-- Связанные темы, рассматриваемые в других разделах (2.12)
+  альтернативы, метрики успеха (2.4–2.11)
+- Сводную матрицу «сценарии × компоненты СМА» (2.12)
 
 ## 2.2. Акторы и их цели
 
@@ -55,9 +54,9 @@
 | S4 | Управление on-call ротациями | U4 Тимлид | Недельн.  | Средняя  |
 | S5 | Maintenance window / silence | U1 SRE  | Дневн. | Средняя  |
 | S6 | Управление SLO и burn-rate алертами| U1 SRE / U4 Тимлид | Месячн.| Высокая|
+| S7 | Capacity planning | U1 SRE / Платформа | Квартальн. | Средняя |
 | S8 | DR: восстановление СМА после сбоя | U1 SRE | Редко | Критич.  |
-
-**Примечание:** S7 (security-инциденты) и S9 (multi-tenancy onboarding) намеренно вынесены за рамки CONOPS — они затрагиваются в Разделе 7 (Cross-cutting: Security и Multi-tenancy).
+**Примечание:** Security-инциденты и multi-tenancy onboarding намеренно вынесены за рамки CONOPS — они затрагиваются в Разделе 7 (Cross-cutting: Security и Multi-tenancy).
 
 ## 2.4. Сценарий S1: Onboarding нового сервиса
 
@@ -340,7 +339,7 @@ SRE планирует работы по обновлению сервиса. С
 
 ### Акторы
 
--   **Главный:**  U1 SRE / U3 DevOps
+-   **Главный:**  U1 SRE / U3 Service Owner
 -   **Системы:**  СМА, E5 Jira (link)
 
 ### Предусловия
@@ -359,26 +358,27 @@ SRE планирует работы по обновлению сервиса. С
 1.  SRE открывает раздел «Silences» в UI
 2.  Создаёт silence: matchers (service=payment, env=prod), start_time, duration (2 часа), reason (link to Jira change ticket)
 3.  СМА валидирует: есть ли права, не слишком ли широкий matcher (не вся прод заглушается)
-4.  СМА сохраняет silence, начинает применять его в Rules Engine
+4.  СМА сохраняет silence, начинает применять его в Alert Manager  (silence подавляет уведомления уже сгенерированных алертов,  а не отключает evaluation правил)
 5.  В период silence сработавшие алерты не отправляются в каналы (но фиксируются в истории с пометкой «silenced»)
 6.  По истечении времени СМА деактивирует silence
 7.  Если за время silence было N suppressed алертов — SRE получает summary report
 
 ```mermaid
 sequenceDiagram
-SRE->>SMA_UI: Create silence (matchers, duration, reason)
-SMA_UI->>SMA: Validate permissions and scope
+SRE->>SMA_UI: Создать silence (matchers, duration, reason)
+SMA_UI->>SMA: Проверить permissions и scope
 SMA-->>SMA_UI: Validation OK
-SMA_UI->>RulesEngine: Apply silence
-SMA->>AuditLog: Record silence creation
-Note right of SMA: During silence period
-Service->>SMA: Metrics (degraded)
-SMA->>RulesEngine: Evaluate
-RulesEngine->>RulesEngine: Match silence, suppress
-RulesEngine->>SMA: Log suppressed alert
-Note right of SMA: Silence expires
-SMA->>RulesEngine: Remove silence
-SMA->>SRE: Send summary report
+SMA_UI->>AlertManager: Применить silence
+SMA->>AuditLog: Записать создание silence
+Note right of SMA: Период действия silence
+Service->>SMA: Метрики (degraded)
+SMA->>RulesEngine: Evaluate rules
+RulesEngine->>AlertManager: Alert triggered
+AlertManager->>AlertManager: Совпадение по silence, suppress notification
+AlertManager->>SMA: Записать suppressed alert
+Note right of SMA: Silence истёк
+SMA->>AlertManager: Снять silence
+SMA->>SRE: Отправить summary report
 ```
 ### Альтернативные потоки
 
@@ -474,7 +474,68 @@ SMA_UI-->>SRE: Display review report
 -   SLO compliance rate (доля сервисов в зелёной зоне): отслеживается, не имеет fixed target
 -   Время от breach до action item в Jira: < 1 рабочий день
 
-## 2.10. Сценарий S8: DR — восстановление СМА после сбоя
+## 2.10. Сценарий S7: Capacity planning
+
+### Краткое описание
+
+Платформенная команда (SRE СМА) периодически анализирует тренды роста нагрузки на платформу, прогнозирует точки исчерпания ресурсов и инициирует горизонтальное расширение до возникновения проблем.
+
+### Акторы
+
+-   **Главный:** U1 SRE (платформенная команда СМА)
+-   **Поддержка:** U4 Тимлиды команд-тенантов (при peer review прогнозов)
+-   **Системы:** СМА (long-range queries по собственным метрикам), E7 CI/CD (для применения capacity changes)
+
+### Предусловия
+
+-   СМА работает в production не менее 3 месяцев (накоплены baseline метрики)
+-   Включён self-monitoring (FR-DR-001) — доступны метрики собственного потребления ресурсов
+-   Определены capacity thresholds (например, 70% утилизации = trigger для планирования)
+
+### Постусловия (success)
+
+-   Зафиксирован прогноз роста на горизонте 1–2 квартала
+-   Принято решение: scale out / optimize / accept risk
+-   При необходимости — выполнено horizontal scaling без downtime (QAS-SCAL-02)
+
+### Основной поток
+
+1.  SRE открывает self-monitoring dashboard СМА
+2.  Анализирует long-range метрики (13-месячное окно): ingestion rate, cardinality growth, storage usage, query volume per tenant
+3.  Идентифицирует top growth contributors:
+    -   Какие тенанты растут быстрее всего
+    -   Какие сигналы (metrics / logs / traces) дают основной прирост cost
+    -   Где приближаемся к квотам (FR-ADM-002)
+4.  Строит прогноз на 1–2 квартала через linear/exponential extrapolation
+5.  Сравнивает прогноз с текущей capacity:
+    -   Хватит ли storage до конца квартала?
+    -   Хватит ли compute для query peak?
+    -   Не упрёмся ли в cardinality limits Mimir?
+6.  Принимает решение:
+    -   **Scale out** — увеличить количество replicas Mimir/Loki/Tempo через Argo CD PR
+    -   **Optimize** — пересмотреть retention для отдельных tenants, добавить recording rules для дорогих queries
+    -   **Quota adjustment** — пересмотреть квоты тенантов
+    -   **Cost report** — отправить отчёт тимлидам с рекомендациями
+7.  Изменения применяются через GitOps (ADR-010); валидируется через QAS-SCAL-02
+
+### Альтернативные потоки
+
+-   **A1: Внеплановый рост** — burst-онбординг новой большой команды → ad-hoc capacity review
+-   **A2: Cost overrun** (превышение C-COST-01) → emergency review с прямой коммуникацией владельцам ресурсов
+-   **A3: Cardinality explosion от одного тенанта** → не capacity planning, а instant rate limiting через FR-ADM-002
+
+### Метрики успеха сценария
+
+-   Время от прогноза до scale-out (если нужен): < 1 рабочий день
+-   Capacity headroom: всегда ≥ 30% (никогда не работаем «впритык»)
+-   Точность прогноза 1-квартального горизонта: ±20%
+-   Количество capacity-инцидентов (out-of-capacity surprises): 0
+
+### Связи
+
+QAS-SCAL-01 (изоляция тенантов), QAS-SCAL-02 (горизонтальное масштабирование), FR-ADM-002 (квоты), FR-DR-001 (self-monitoring).
+
+## 2.11. Сценарий S8: DR — восстановление СМА после сбоя
 
 ### Краткое описание
 
@@ -549,28 +610,20 @@ SRE->>SMA: Run post-mortem
 -   Catch-up notification delivery: 100% алертов окна восстановлены или явно помечены как «lost»
 -   DR drill frequency: квартально (game day)
 
-## 2.11. Сводная матрица сценариев и компонентов СМА
+
+## 2.12. Сводная матрица сценариев и компонентов СМА
 
 Чтобы связать CONOPS с будущей декомпозицией (Раздел 5), отметим, какие компоненты СМА задействованы в каждом сценарии.
 
-| S  | Сценарий       | Ingestion  | Storage  | Rules  | Alerts   | OnCall | UI/API | Notifier |
-|----|----------------|------------|----------|--------|----------|--------|--------|----------|
-| S1 | Onboarding     |    X       |    X     |   X    |          |        |   X    |          |
-| S2 | Алерт+эскал.   |    X       |    X     |   X    |    X     |   X    |        |    X     |
-| S3 | Расследование  |            |    X     |        |          |        |   X    |          |
-| S4 | On-call rotat. |            |          |        |          |   X    |   X    |          |
-| S5 | Maintenance    |            |          |   X    |    X     |        |   X    |          |
-| S6 | SLO            |    X       |    X     |   X    |    X     |        |   X    |          |
-| S8 | DR             |    X       |    X     |   X    |    X     |   X    |   X    |    X     |
+| S  | Сценарий          | Ingestion | Storage | Rules | Alerts | OnCall | UI/API | Notifier |
+|----|-------------------|-----------|---------|-------|--------|--------|--------|----------|
+| S1 | Onboarding        |    X      |    X    |   X   |        |        |    X   |          |
+| S2 | Алерт+эскал.      |    X      |    X    |   X   |   X    |    X   |        |    X     |
+| S3 | Расследование     |           |    X    |       |        |        |    X   |          |
+| S4 | On-call rotation  |           |         |       |        |    X   |    X   |          |
+| S5 | Maintenance       |           |         |   X   |   X    |        |    X   |          |
+| S6 | SLO               |    X      |    X    |   X   |   X    |        |    X   |          |
+| S7 | Capacity planning |           |    X    |       |        |        |    X   |          |
+| S8 | DR                |    X      |    X    |   X   |   X    |    X   |    X   |    X     |
 
-**Вывод:** S2 (главный happy path) задействует **почти все** компоненты — это объясняет, почему он самый критичный для архитектуры. S3 (расследование) показывает важность UI/API и storage с быстрым ad-hoc query. S8 (DR) — единственный сценарий, требующий полной кросс-компонентной отказоустойчивости.
-
-## 2.12. Что НЕ покрыто CONOPS (Out of scope)
-Следующие аспекты эксплуатации намеренно вынесены в другие разделы: 
-| Тема | Раздел | 
-|------|-----------| 
-| Multi-tenancy onboarding | Раздел 7 | 
-| Security incident response | Раздел 7 | 
-| Capacity planning | Раздел 8 | 
-| Внутренние операции (upgrades) | Раздел 7 | 
-| Compliance аудит | Раздел 7 |
+**Вывод:** S2 (главный happy path) задействует **почти все** компоненты — это объясняет, почему он самый критичный для архитектуры. S3 (расследование) показывает важность UI/API и storage с быстрым ad-hoc query. S7 — read-only сценарий на исторических данных. S8 (DR) — единственный сценарий, требующий полной кросс-компонентной отказоустойчивости.
