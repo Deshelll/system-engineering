@@ -147,7 +147,7 @@
 9.  Если severity = P1, СМА автоматически создаёт ticket в Jira (E5) с контекстом
 10.  On-call переходит к расследованию (см. S3)
 
-![Sequence Diagram](/src/assets/2.5.svg)
+<img src="/src/assets/2.5.svg" width="100%">
 
 ### Альтернативные потоки
 
