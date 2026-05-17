@@ -92,21 +92,9 @@
 6.  СМА применяет default alerting profile на основе criticality (например, для tier-1 — стандартные RED-алерты с порогами)
 7.  Разработчик заходит в UI СМА, видит свой сервис в каталоге, проверяет дашборды
 8.  Разработчик при желании кастомизирует алерты через декларативный конфиг (PR в Git-репозиторий с alerting rules)
-```mermaid
-sequenceDiagram
-Developer->>Git: Push manifest with monitoring annotation
-Git->>ArgoCD: Trigger sync
-ArgoCD->>K8s: Apply manifest
-K8s->>SMA: Admission webhook call
-SMA-->>K8s: Inject sidecar agents
-K8s->>Pod: Start with agents
-Pod->>SMA: Send metrics/logs/traces
-SMA->>Catalog: Fetch service metadata
-Catalog-->>SMA: Owner, team, criticality
-SMA->>SMA: Apply default alerting profile
-Developer->>SMA: Open UI, verify dashboards
-Note right of SMA: Service is now monitored<br/>with RED metrics by default
-```
+
+![Sequence Diagram](/src/assets/2.4.svg)
+
 ### Альтернативные потоки
 
 -   **A1: Сервис не в K8s**  (legacy VM) → разработчик ставит agent вручную, получает токен из СМА UI
@@ -159,29 +147,8 @@ Note right of SMA: Service is now monitored<br/>with RED metrics by default
 9.  Если severity = P1, СМА автоматически создаёт ticket в Jira (E5) с контекстом
 10.  On-call переходит к расследованию (см. S3)
 
-```mermaid
-sequenceDiagram
-Service->>SMA: Metrics stream
-SMA->>SMA: Evaluate rules
-Note right of SMA: error_rate > 5% over 5min
-SMA->>SMA: Create alert, set severity P1
-SMA->>OnCallScheduler: Get current on-call
-OnCallScheduler-->>SMA: User U2
-SMA->>Slack: Post alert in team channel
-SMA->>MobileApp: Push notification to U2
-Note right of SMA: t = 0 min
-SMA->>SMA: Wait for ack (2 min)
-SMA->>Twilio: Send SMS to U2
-Note right of SMA: t = 2 min, no ack
-SMA->>Twilio: Place call to U2
-Note right of SMA: t = 5 min, no ack
-U2->>MobileApp: Acknowledge alert
-MobileApp->>SMA: Ack received
-SMA->>SMA: Stop escalation
-SMA->>Jira: Create incident ticket
-Jira-->>SMA: Ticket ID
-SMA->>Slack: Update thread with ticket link
-```
+![Sequence Diagram](/src/assets/2.5.svg)
+
 ### Альтернативные потоки
 
 -   **A1: On-call не отвечает**  > 10 мин → эскалация на тимлида (U4), дальше — на secondary on-call команды
@@ -238,24 +205,7 @@ On-call получил алерт, открывает UI СМА, переход�
 9.  Записывает findings в Jira ticket
 10.  Принимает решение: временно увеличить timeout + поставить задачу на добавление circuit breaker
 
-```mermaid
-sequenceDiagram
-OnCall->>SMA_UI: Open alert detail
-SMA_UI->>MetricsStore: Query metric around incident time
-MetricsStore-->>SMA_UI: Time series data
-SMA_UI->>CorrelationEngine: Find related signals
-CorrelationEngine-->>SMA_UI: Deploy event, latency spike
-SMA_UI-->>OnCall: Display dashboard with correlations
-OnCall->>SMA_UI: Click "View logs"
-SMA_UI->>LogsStore: Query logs (service, time, level=error)
-LogsStore-->>SMA_UI: Log entries with trace_id
-OnCall->>SMA_UI: Click trace_id
-SMA_UI->>TracesStore: Get trace by id
-TracesStore-->>SMA_UI: Full trace with spans
-SMA_UI-->>OnCall: Display trace waterfall
-Note right of OnCall: Root cause found:<br/>slow external API
-OnCall->>Jira: Update ticket with findings
-```
+![Sequence Diagram](/src/assets/2.6.svg)
 
 ### Альтернативные потоки
 
@@ -303,21 +253,7 @@ OnCall->>Jira: Update ticket with findings
 7.  Коллега подтверждает swap в UI/Slack
 8.  СМА обновляет schedule, отправляет confirm всем
 
-```mermaid
-sequenceDiagram
-TeamLead->>SMA_UI: Create rotation (members, duration)
-SMA_UI->>OnCallScheduler: Generate schedule
-OnCallScheduler-->>SMA_UI: 12-week schedule
-TeamLead->>SMA_UI: Publish schedule
-SMA_UI->>Slack: Notify team members
-Note right of SMA_UI: Some time later
-Engineer1->>SMA_UI: Request swap with Engineer2
-SMA_UI->>Slack: Ask Engineer2 to confirm
-Engineer2->>Slack: Confirm swap
-Slack->>SMA_UI: Swap confirmed
-SMA_UI->>OnCallScheduler: Update schedule
-SMA_UI->>Slack: Notify both engineers
-```
+![Sequence Diagram](/src/assets/2.7.svg)
 
 ### Альтернативные потоки
 
@@ -363,23 +299,8 @@ SRE планирует работы по обновлению сервиса. С
 6.  По истечении времени СМА деактивирует silence
 7.  Если за время silence было N suppressed алертов — SRE получает summary report
 
-```mermaid
-sequenceDiagram
-SRE->>SMA_UI: Создать silence (matchers, duration, reason)
-SMA_UI->>SMA: Проверить permissions и scope
-SMA-->>SMA_UI: Validation OK
-SMA_UI->>AlertManager: Применить silence
-SMA->>AuditLog: Записать создание silence
-Note right of SMA: Период действия silence
-Service->>SMA: Метрики (degraded)
-SMA->>RulesEngine: Evaluate rules
-RulesEngine->>AlertManager: Alert triggered
-AlertManager->>AlertManager: Совпадение по silence, suppress notification
-AlertManager->>SMA: Записать suppressed alert
-Note right of SMA: Silence истёк
-SMA->>AlertManager: Снять silence
-SMA->>SRE: Отправить summary report
-```
+![Sequence Diagram](/src/assets/2.8.svg)
+
 ### Альтернативные потоки
 
 -   **A1: Bulk silence через CI/CD**  — pipeline создаёт silence перед деплоем и снимает после успешного rollout (через СМА API)
@@ -442,26 +363,8 @@ SRE определяет SLO для сервиса (например, availabili
     -   Видит топ причин «прожига» (correlation с инцидентами/деплоями)
     -   Принимает решения: усилить reliability work / разрешить feature work / freeze deploys
 
-```mermaid
-sequenceDiagram
-SRE->>Git: Push SLO definition (YAML)
-Git->>CI: Trigger pipeline
-CI->>SMA: Register SLO via API
-SMA->>SLOEngine: Activate SLO computation
-Note right of SLOEngine: Continuous evaluation
-Service->>SMA: Metrics stream
-SMA->>SLOEngine: Update SLI value
-SLOEngine->>SLOEngine: Compute error budget
-SLOEngine->>SLOEngine: Compute burn rate
-Note right of SLOEngine: Burn rate = 14.4x detected
-SLOEngine->>SMA: Trigger fast-burn alert (P1)
-SMA->>OnCall: Standard alert flow (S2)
-Note right of SRE: Weekly review
-SRE->>SMA_UI: Open SLO dashboard
-SMA_UI->>SLOEngine: Query SLO state
-SLOEngine-->>SMA_UI: Budget, burn history, correlations
-SMA_UI-->>SRE: Display review report
-```
+![Sequence Diagram](/src/assets/2.9.svg)
+
 ### Альтернативные потоки
 
 -   **A1: SLO breach**  (бюджет полностью исчерпан) → автоматический deploy freeze через интеграцию с E7 CI/CD (опционально, как policy)
@@ -572,25 +475,7 @@ QAS-SCAL-01 (изоляция тенантов), QAS-SCAL-02 (горизонта
 9.  После восстановления primary — controlled failback (обычно в нерабочее время)
 10.  Запускается post-mortem (через S3-подобный процесс)
 
-```mermaid
-sequenceDiagram
-SelfMonitoring->>SelfMonitoring: Detect primary SMA down
-SelfMonitoring->>SRE: Page SMA on-call (P0)
-SRE->>Runbook: Initiate DR failover
-Runbook->>DNS: Switch to DR endpoint
-Runbook->>DR_SMA: Activate
-DR_SMA->>Git: Pull alert rules, dashboards
-Git-->>DR_SMA: Configs
-DR_SMA->>Backup: Restore schedules, silences
-Backup-->>DR_SMA: State data
-Note right of DR_SMA: DR is operational
-Service->>DR_SMA: Metrics (auto-reconnect)
-DR_SMA->>DR_SMA: Resume rules evaluation
-DR_SMA->>OnCall: Catch-up notifications
-SRE->>Primary_SMA: Begin recovery
-Note right of SRE: Later: controlled failback
-SRE->>SMA: Run post-mortem
-```
+![Sequence Diagram](/src/assets/2.10.svg)
 
 ### Альтернативные потоки
 
