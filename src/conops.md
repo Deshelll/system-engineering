@@ -36,14 +36,13 @@
 |     |                        | - Расследовать security-инциденты       | - Retention audit >= 1 год       |
 
 **Дополнительные акторы (системы), которые ведут себя как пользователи:**
-| ID  | Системный актор        | Главные цели | Метрики успеха|
-|-----|------------------------|-----------------------------------------|----------------------------------|
-| SA1 | CI/CD pipeline (E7)    | - Уведомить СМА о деплое                | - Deploy event delivered < 5 сек |
-|     |                        | - Получить smoke-check status           |                                  |
-| SA2 | Service Catalog (E8)   | - Синхронизировать метаданные сервисов  | - Sync lag < 1 мин               |
-|     |                        | - Передавать ownership info             |                                  |
-| SA3 | Auto-instrumentation   | - Получать конфиги collection           | - Config delivery < 30 сек       |
-|     | агенты в Pods          | - Отправлять метрики/логи/трейсы        | - Data loss < 0.01% |
+
+| ID | Системный актор | Главные цели | Метрики успеха |
+|----|-----------------|---------------|-----------------|
+| SA1 | CI/CD pipeline (E7) | Уведомить СМА о деплое; получить smoke-check status | Deploy event delivered < 5 сек |
+| SA2 | Service Catalog (E8) | Синхронизировать метаданные сервисов; передавать ownership info | Sync lag < 1 мин |
+| SA3 | Auto-instrumentation агенты в Pods | Получать конфиги collection; отправлять метрики/логи/трейсы | Config delivery < 30 сек; Data loss < 0.01% |
+
 ## 2.3. Каталог сценариев
 
 | ID | Название  | Главный актор| Частота   | Критичн. |
@@ -147,9 +146,7 @@
 9.  Если severity = P1, СМА автоматически создаёт ticket в Jira (E5) с контекстом
 10.  On-call переходит к расследованию (см. S3)
 
-<div style="background:white; padding:20px; border-radius:12px;">
-  <img src="./assets/2.5.svg" width="100%">
-</div>
+![](./assets/2.5.svg)
 
 ### Альтернативные потоки
 
@@ -207,9 +204,8 @@ On-call получил алерт, открывает UI СМА, переход�
 9.  Записывает findings в Jira ticket
 10.  Принимает решение: временно увеличить timeout + поставить задачу на добавление circuit breaker
 
-<div style="background:white; padding:20px; border-radius:12px;">
-  <img src="./assets/2.6.svg" width="100%">
-</div>
+![](./assets/2.6.svg)
+
 ### Альтернативные потоки
 
 -   **A1: Логи не содержат trace_id**  → on-call использует поиск по времени и текстовый поиск
@@ -256,9 +252,7 @@ On-call получил алерт, открывает UI СМА, переход�
 7.  Коллега подтверждает swap в UI/Slack
 8.  СМА обновляет schedule, отправляет confirm всем
 
-<div style="background:white; padding:20px; border-radius:12px;">
-  <img src="./assets/2.7.svg" width="100%">
-</div>
+![](./assets/2.7.svg)
 
 ### Альтернативные потоки
 
@@ -304,9 +298,7 @@ SRE планирует работы по обновлению сервиса. С
 6.  По истечении времени СМА деактивирует silence
 7.  Если за время silence было N suppressed алертов — SRE получает summary report
 
-<div style="background:white; padding:20px; border-radius:12px;">
-  <img src="./assets/2.8.svg" width="100%">
-</div>
+![](./assets/2.8.svg)
 
 ### Альтернативные потоки
 
@@ -370,9 +362,7 @@ SRE определяет SLO для сервиса (например, availabili
     -   Видит топ причин «прожига» (correlation с инцидентами/деплоями)
     -   Принимает решения: усилить reliability work / разрешить feature work / freeze deploys
 
-<div style="background:white; padding:20px; border-radius:12px;">
-  <img src="./assets/2.9.svg" width="100%">
-</div>
+![](./assets/2.9.svg)
 
 ### Альтернативные потоки
 
@@ -484,9 +474,7 @@ QAS-SCAL-01 (изоляция тенантов), QAS-SCAL-02 (горизонта
 9.  После восстановления primary — controlled failback (обычно в нерабочее время)
 10.  Запускается post-mortem (через S3-подобный процесс)
 
-<div style="background:white; padding:20px; border-radius:12px;">
-  <img src="./assets/2.11.svg" width="100%">
-</div>
+![](./assets/2.11.svg)
 
 ### Альтернативные потоки
 
