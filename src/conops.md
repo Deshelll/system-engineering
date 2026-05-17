@@ -205,7 +205,7 @@ On-call получил алерт, открывает UI СМА, переход�
 9.  Записывает findings в Jira ticket
 10.  Принимает решение: временно увеличить timeout + поставить задачу на добавление circuit breaker
 
-![Sequence Diagram](/src/assets/2.6.svg)
+![](./assets/2.6.svg)
 
 ### Альтернативные потоки
 
@@ -253,7 +253,7 @@ On-call получил алерт, открывает UI СМА, переход�
 7.  Коллега подтверждает swap в UI/Slack
 8.  СМА обновляет schedule, отправляет confirm всем
 
-![Sequence Diagram](/src/assets/2.7.svg)
+![](./assets/2.7.svg)
 
 ### Альтернативные потоки
 
@@ -299,7 +299,7 @@ SRE планирует работы по обновлению сервиса. С
 6.  По истечении времени СМА деактивирует silence
 7.  Если за время silence было N suppressed алертов — SRE получает summary report
 
-![Sequence Diagram](/src/assets/2.8.svg)
+![](./assets/2.8.svg)
 
 ### Альтернативные потоки
 
@@ -363,7 +363,7 @@ SRE определяет SLO для сервиса (например, availabili
     -   Видит топ причин «прожига» (correlation с инцидентами/деплоями)
     -   Принимает решения: усилить reliability work / разрешить feature work / freeze deploys
 
-![Sequence Diagram](/src/assets/2.9.svg)
+![](./assets/2.9.svg)
 
 ### Альтернативные потоки
 
@@ -475,7 +475,7 @@ QAS-SCAL-01 (изоляция тенантов), QAS-SCAL-02 (горизонта
 9.  После восстановления primary — controlled failback (обычно в нерабочее время)
 10.  Запускается post-mortem (через S3-подобный процесс)
 
-![Sequence Diagram](/src/assets/2.10.svg)
+![](./assets/2.10.svg)
 
 ### Альтернативные потоки
 
